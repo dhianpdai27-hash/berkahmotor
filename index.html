@@ -560,6 +560,18 @@
     </div>
 
     <script>
+        // ==========================
+// DATABASE GLOBAL
+// ==========================
+
+let dbProducts = [];
+let dbSales = [];
+let dbDetailSales = [];
+let dbDashboard = [];
+let dbCustomers = [];
+let dbSettings = {};
+
+const GAS_URL = "URL_WEBAPP_GAS_KAMU";
         // 1. DISINI TEMPAT MENEMPELKAN LINK WEB APP GOOGLE APPS SCRIPT ANDA
         const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyzCWGtgQuqsBCNHwJ-8QfY5hPU1RZLFRbFwELm3LrCZD6M0gM6cMluAEGRzCrEFbChXw/exec";
 
@@ -600,10 +612,17 @@
                 dbProducts = defaultProducts;
             }
 
-            if (result.sales && Array.isArray(result.sales)) {
-                dbSales = result.sales;
-                localStorage.setItem('local_sales', JSON.stringify(dbSales));
-            }
+           if (result.sales && Array.isArray(result.sales)) {
+    dbSales = result.sales;
+}
+
+if (result.detail_sales && Array.isArray(result.detail_sales)) {
+    dbDetailSales = result.detail_sales;
+}
+
+if (result.dashboard && Array.isArray(result.dashboard)) {
+    dbDashboard = result.dashboard;
+}
         }
 
         // ==============================
@@ -751,7 +770,16 @@
         0
     );
 
-    let hpp = dbSales.reduce((s, a) => {
+    let hpp = dbDetailSales.reduce((s, a) => {
+
+    return s +
+        (
+            parseInt(a.harga_beli || 0)
+            *
+            parseInt(a.qty || 0)
+        );
+
+}, 0);
 
         let modal = 0;
 
@@ -1044,15 +1072,79 @@ let dataChart = originalLabels.map(tgl => {
             let kmNow = parseInt(document.getElementById('srv-km-now').value) || 0;
             let kmNext = kmNow > 0 ? (kmNow + 5000) : 0;
 
-            let dataTrx = {
-                id_transaksi: 'TRX-' + Date.now(),
-                tanggal: new Date().toLocaleDateString('id-ID'),
-                jam: new Date().toLocaleTimeString('id-ID'),
-                customer: { nopol: nopol, nama: name, wa: phone, mobil: unit, km: kmNow, next_km: kmNext },
-                total: grand, diskon: parseInt(document.getElementById('pos-discount').value) || 0,
-                dibayar: cash, kembalian: cash - grand, kasir: userRole, items: currentCart
-            };
+            const now = new Date();
 
+const tanggal =
+    now.getFullYear() + '-' +
+    String(now.getMonth()+1).padStart(2,'0') + '-' +
+    String(now.getDate()).padStart(2,'0');
+
+const jam =
+    String(now.getHours()).padStart(2,'0') + ':' +
+    String(now.getMinutes()).padStart(2,'0');
+
+let trxId = 'TRX-' + Date.now();
+
+let dataTrx = {
+
+    id_transaksi: trxId,
+
+    tanggal: tanggal,
+
+    jam: jam,
+
+    nopol: nopol,
+
+    nama_customer: name,
+
+    tipe_mobil: unit,
+
+    km_sekarang: kmNow,
+
+    km_next_ganti: kmNext,
+
+    subtotal: currentCart.reduce((s,a)=>s+a.subtotal,0),
+
+    diskon:
+        parseInt(
+            document.getElementById('pos-discount').value
+        ) || 0,
+
+    total: grand,
+
+    dibayar: cash,
+
+    kembalian: cash - grand,
+
+    kasir: userRole
+};
+let detailItems = currentCart.map(item => {
+
+    return {
+
+        id_detail:
+            'DTL-' + Date.now() + '-' + item.kode_barang,
+
+        id_transaksi: trxId,
+
+        tanggal: tanggal,
+
+        kode_barang: item.kode_barang,
+
+        nama_barang: item.nama_barang,
+
+        kategori: item.kategori,
+
+        harga_beli: item.harga_beli,
+
+        harga_jual: item.harga_jual,
+
+        qty: item.qty,
+
+        subtotal: item.subtotal
+    };
+
+});
             currentCart.forEach(item => {
                 let target = dbProducts.find(x => x.id_produk === item.id_produk);
                 if(target && target.kategori !== "Jasa Servis") {
@@ -1061,7 +1153,12 @@ let dataChart = originalLabels.map(tgl => {
             });
 
             dbSales.unshift(dataTrx);
+            dbDetailSales.unshift(...detailItems);
             localStorage.setItem('local_sales', JSON.stringify(dbSales));
+            localStorage.setItem(
+    'local_detail_sales',
+    JSON.stringify(dbDetailSales)
+);
             localStorage.setItem('local_prod', JSON.stringify(dbProducts));
 
             // PERBAIKAN: Gunakan text/plain agar tidak diblokir saat transaksi kasir berjalan
@@ -1069,7 +1166,14 @@ let dataChart = originalLabels.map(tgl => {
                 fetch(WEB_APP_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'text/plain;charset=utf-8' },
-                    body: JSON.stringify({ action: "simpan_transaksi", data: dataTrx })
+                    body: JSON.stringify({
+
+    action: "simpan_transaksi",
+
+    header: dataTrx,
+
+    detail: detailItems
+})
                 }).catch(err => console.error("Gagal sinkronisasi data transaksi ke Sheets: ", err));
 
                 // Sync stok terpotong
@@ -1102,16 +1206,24 @@ let dataChart = originalLabels.map(tgl => {
         function renderServiceHistoryTable() {
             let html = '';
             dbSales.forEach((s, index) => {
-                let itemsList = s.items.map(i => `<span class="badge bg-danger me-1">${i.qty}x ${i.nama_barang}</span>`).join('<br>');
+                let detail = dbDetailSales.filter(d =>
+    d.id_transaksi === s.id_transaksi
+);
+
+let itemsList = detail.map(i => `
+    <span class="badge bg-danger me-1">
+        ${i.qty}x ${i.nama_barang}
+    </span>
+`).join('<br>');
                 let displayStyle = index < limitHistory ? "" : 'style="display:none;" class="row-hidden"';
                 
                 html += `
                     <tr ${displayStyle}>
                         <td>${s.tanggal}<br><small class="text-muted">${s.jam}</small></td>
-                        <td><strong class="text-danger">${s.customer.nopol}</strong><br>${s.customer.nama} (${s.customer.mobil})</td>
+                        <td><strong class="text-danger">${s.nopol}</strong><br>${s.nama_customer} (${s.tipe_mobil})</td>
                         <td>${itemsList}</td>
-                        <td class="text-end font-monospace">${s.customer.km.toLocaleString()} KM</td>
-                        <td class="text-end text-warning font-monospace fw-bold">${s.customer.next_km > 0 ? s.customer.next_km.toLocaleString() + ' KM' : '-'}</td>
+                        <td class="text-end font-monospace">${s.km_sekarang} KM</td>
+                        <td class="text-end text-warning font-monospace fw-bold">${s.km_next_ganti > 0 ? s.customer.next_km.toLocaleString() + ' KM' : '-'}</td>
                         <td class="text-end text-money">Rp ${s.total.toLocaleString('id-ID')}</td>
                     </tr>
                 `;
