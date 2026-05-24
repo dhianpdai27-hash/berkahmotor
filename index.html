@@ -571,9 +571,9 @@ let dbDashboard = [];
 let dbCustomers = [];
 let dbSettings = {};
 
-const GAS_URL = "URL_WEBAPP_GAS_KAMU";
+const GAS_URL = "https://script.google.com/macros/s/AKfycby6r_H9GMLq1jBDd_W1PBbJf0O88kP43V9YbZqPWB6NL722QU7x6WYB6Phv9BUsq97q/exec";
         // 1. DISINI TEMPAT MENEMPELKAN LINK WEB APP GOOGLE APPS SCRIPT ANDA
-        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycbyzCWGtgQuqsBCNHwJ-8QfY5hPU1RZLFRbFwELm3LrCZD6M0gM6cMluAEGRzCrEFbChXw/exec";
+        const WEB_APP_URL = "https://script.google.com/macros/s/AKfycby6r_H9GMLq1jBDd_W1PBbJf0O88kP43V9YbZqPWB6NL722QU7x6WYB6Phv9BUsq97q/exec";
 
         let dbProducts = [];
         let dbSales = [];
@@ -591,9 +591,24 @@ const GAS_URL = "URL_WEBAPP_GAS_KAMU";
         ];
 
         document.addEventListener('DOMContentLoaded', () => {
-            loadDatabaseSession();
-            setupEvents();
-        });
+
+    // LOAD DATABASE AWAL
+    loadDatabaseSession();
+
+    // EVENT LISTENER
+    setupEvents();
+
+    // ====================================
+    // AUTO REFRESH REALTIME
+    // ====================================
+
+    setInterval(() => {
+
+        refreshDatabaseFromSheet();
+
+    }, 15000);
+
+});
 
         async function loadDatabaseSession() {
     try {
@@ -615,9 +630,16 @@ const GAS_URL = "URL_WEBAPP_GAS_KAMU";
            if (result.sales && Array.isArray(result.sales)) {
     dbSales = result.sales;
 }
-
+if (result.sales && Array.isArray(result.sales)) {
+    dbSales = result.sales;
+    localStorage.setItem('local_sales', JSON.stringify(dbSales));
+}
 if (result.detail_sales && Array.isArray(result.detail_sales)) {
     dbDetailSales = result.detail_sales;
+    localStorage.setItem(
+        'local_detail_sales',
+        JSON.stringify(dbDetailSales)
+    );
 }
 
 if (result.dashboard && Array.isArray(result.dashboard)) {
@@ -639,7 +661,11 @@ if (result.dashboard && Array.isArray(result.dashboard)) {
                 dbSales = JSON.parse(localStorage.getItem('local_sales'));
             }
         }
-
+if(localStorage.getItem('local_detail_sales')) {
+    dbDetailSales = JSON.parse(
+        localStorage.getItem('local_detail_sales')
+    );
+}
         // ==============================
         // SETTINGS NOTA
         // ==============================
@@ -675,7 +701,121 @@ if (result.dashboard && Array.isArray(result.dashboard)) {
         }
     }
 }
+async function refreshDatabaseFromSheet() {
 
+    try {
+
+        if (WEB_APP_URL === "") return;
+
+        const response =
+            await fetch(
+                WEB_APP_URL + '?action=get_all_data'
+            );
+
+        const result = await response.json();
+
+        // ====================================
+        // PRODUCTS
+        // ====================================
+
+        if (
+            result.products &&
+            Array.isArray(result.products)
+        ) {
+
+            dbProducts = result.products;
+
+            localStorage.setItem(
+                'local_prod',
+                JSON.stringify(dbProducts)
+            );
+        }
+
+        // ====================================
+        // SALES
+        // ====================================
+
+        if (
+            result.sales &&
+            Array.isArray(result.sales)
+        ) {
+
+            dbSales = result.sales;
+
+            localStorage.setItem(
+                'local_sales',
+                JSON.stringify(dbSales)
+            );
+        }
+
+        // ====================================
+        // DETAIL SALES
+        // ====================================
+
+        if (
+            result.detail_sales &&
+            Array.isArray(result.detail_sales)
+        ) {
+
+            dbDetailSales =
+                result.detail_sales;
+
+            localStorage.setItem(
+                'local_detail_sales',
+                JSON.stringify(dbDetailSales)
+            );
+        }
+
+        // ====================================
+        // REFRESH VIEW AKTIF
+        // ====================================
+
+        if (
+            !document.getElementById('view-dashboard')
+                .classList.contains('d-none')
+        ) {
+
+            renderDashboardData();
+        }
+
+        if (
+            !document.getElementById('view-pos')
+                .classList.contains('d-none')
+        ) {
+
+            renderPOSProducts();
+
+            renderServiceHistoryTable();
+        }
+
+        if (
+            !document.getElementById('view-inventory')
+                .classList.contains('d-none')
+        ) {
+
+            renderInventoryTable();
+        }
+
+        if (
+            !document.getElementById('view-reports')
+                .classList.contains('d-none')
+        ) {
+
+            renderFinancialReports();
+        }
+
+        console.log(
+            'Realtime sync success'
+        );
+
+    } catch(err) {
+
+        console.error(
+            'Realtime sync gagal:',
+            err
+        );
+    }
+}
         function doLogin(role) {
             let correctPassword = role === 'Owner' ? 'owner123' : 'kasir123';
             let inputPassword = prompt(`Login Sebagai ${role}\nMasukkan password rahasia:`);
@@ -853,27 +993,58 @@ if (result.dashboard && Array.isArray(result.dashboard)) {
 
     let omzetPerHari = {};
 
-    dbSales.forEach(trx => {
+    // =====================================
+// REKAP DARI DETAIL PENJUALAN
+// =====================================
 
-        if (!trx.tanggal) return;
+dbDetailSales.forEach(item => {
 
-let tgl = String(trx.tanggal).trim();
+    let kat = item.kategori || '';
 
-if (
-    tgl === '' ||
-    tgl.toLowerCase() === 'undefined' ||
-    tgl.toLowerCase() === 'null' ||
-    tgl.length < 4
-) {
-    return;
-}
+    // =====================================
+    // REKAP JASA
+    // =====================================
 
-if (!omzetPerHari[tgl]) {
-    omzetPerHari[tgl] = 0;
-}
+    if (kat === 'Jasa Servis') {
 
-        omzetPerHari[tgl] +=
-    parseInt(trx.total || 0);
+        if (!rekapJasa[item.nama_barang]) {
+
+            rekapJasa[item.nama_barang] = {
+                qty: 0,
+                total: 0
+            };
+
+        }
+
+        rekapJasa[item.nama_barang].qty +=
+            parseInt(item.qty || 0);
+
+        rekapJasa[item.nama_barang].total +=
+            parseInt(item.subtotal || 0);
+
+    }
+
+    // =====================================
+    // REKAP SPAREPART
+    // =====================================
+
+    else {
+
+        if (!rekapPart[item.nama_barang]) {
+
+            rekapPart[item.nama_barang] = {
+                qty: 0,
+                total: 0
+            };
+
+        }
+
+        rekapPart[item.nama_barang].qty +=
+            parseInt(item.qty || 0);
+
+        rekapPart[item.nama_barang].total +=
+            parseInt(item.subtotal || 0);
+    }
 
 });
 
@@ -1118,6 +1289,47 @@ let dataTrx = {
 
     kasir: userRole
 };
+            // ======================================
+// DETAIL PENJUALAN
+// ======================================
+
+let detailItems = currentCart.map(item => {
+
+    return {
+
+        id_detail:
+            'DTL-' + Date.now() + '-' +
+            Math.floor(Math.random() * 1000),
+
+        id_transaksi:
+            dataTrx.id_transaksi,
+
+        tanggal:
+            dataTrx.tanggal,
+
+        kode_barang:
+            item.kode_barang,
+
+        nama_barang:
+            item.nama_barang,
+
+        kategori:
+            item.kategori,
+
+        harga_beli:
+            parseInt(item.harga_beli || 0),
+
+        harga_jual:
+            parseInt(item.harga_jual || 0),
+
+        qty:
+            parseInt(item.qty || 0),
+
+        subtotal:
+            parseInt(item.subtotal || 0)
+    };
+
+});
 let detailItems = currentCart.map(item => {
 
     return {
@@ -1623,12 +1835,35 @@ async function saveProductData(e) {
             document.getElementById('p-shop-addr').innerText = document.getElementById('cfg-shop-address').value;
             
             document.getElementById('print-header-meta').innerHTML = `
-                <div class="p-flex"><span>No:</span><span>${d.id_transaksi}</span></div>
-                <div class="p-flex"><span>Waktu:</span><span>${d.tanggal} ${d.jam}</span></div>
-                <div class="p-flex"><span>Mobil:</span><span>${d.customer.nopol} (${d.customer.mobil})</span></div>
-                <div class="p-flex"><span>Cust:</span><span>${d.customer.nama}</span></div>
-                <div class="p-flex"><span>KM Log:</span><span>${d.customer.km.toLocaleString()} KM</span></div>
-            `;
+
+    <div class="p-flex">
+        <span>No:</span>
+        <span>${d.id_transaksi}</span>
+    </div>
+
+    <div class="p-flex">
+        <span>Waktu:</span>
+        <span>${d.tanggal} ${d.jam}</span>
+    </div>
+
+    <div class="p-flex">
+        <span>Mobil:</span>
+        <span>${d.nopol} (${d.tipe_mobil})</span>
+    </div>
+
+    <div class="p-flex">
+        <span>Cust:</span>
+        <span>${d.nama_customer}</span>
+    </div>
+
+    <div class="p-flex">
+        <span>KM:</span>
+        <span>
+            ${parseInt(d.km_sekarang || 0)
+                .toLocaleString()} KM
+        </span>
+    </div>
+`;
             let items = '';
             d.items.forEach(i => {
                 items += `<tr><td colspan="2"><strong>${i.nama_barang}</strong></td></tr><tr><td>${i.qty} x Rp ${i.harga_jual.toLocaleString('id-ID')}</td><td class="p-text-right">Rp ${i.subtotal.toLocaleString('id-ID')}</td></tr>`;
@@ -1654,8 +1889,16 @@ async function saveProductData(e) {
 
     let omzet = dbSales.reduce((s, a) => s + (parseInt(a.total) || 0), 0);
 
-    let hpp = dbSales.reduce((s, trx) => {
+    let hpp = dbDetailSales.reduce((s, item) => {
 
+    return s +
+        (
+            parseInt(item.harga_beli || 0)
+            *
+            parseInt(item.qty || 0)
+        );
+
+}, 0);
         let modal = 0;
 
         trx.items.forEach(item => {
@@ -1685,86 +1928,60 @@ async function saveProductData(e) {
     // REKAP JASA DAN SPAREPART
     // =====================================
 
-    let rekapJasa = {};
-    let rekapPart = {};
+// =====================================
+// REKAP DARI DETAIL PENJUALAN
+// =====================================
 
-    dbSales.forEach(trx => {
+dbDetailSales.forEach(item => {
 
-        if (!trx.items || !Array.isArray(trx.items)) return;
+    let kat = item.kategori || '';
 
-        trx.items.forEach(item => {
+    // =====================================
+    // REKAP JASA
+    // =====================================
 
-            // =====================================
-            // AMBIL KATEGORI LANGSUNG DARI TRANSAKSI
-            // =====================================
+    if (kat === 'Jasa Servis') {
 
-            let kat = item.kategori;
+        if (!rekapJasa[item.nama_barang]) {
 
-            // fallback transaksi lama
-            if (!kat) {
+            rekapJasa[item.nama_barang] = {
+                qty: 0,
+                total: 0
+            };
 
-                let nama = (item.nama_barang || '').toLowerCase();
+        }
 
-                if (
-                    nama.includes('jasa') ||
-                    nama.includes('service') ||
-                    nama.includes('servis') ||
-                    nama.includes('ganti oli')
-                ) {
+        rekapJasa[item.nama_barang].qty +=
+            parseInt(item.qty || 0);
 
-                    kat = 'Jasa Servis';
+        rekapJasa[item.nama_barang].total +=
+            parseInt(item.subtotal || 0);
 
-                } else {
+    }
 
-                    kat = 'Sparepart';
+    // =====================================
+    // REKAP SPAREPART
+    // =====================================
 
-                }
-            }
+    else {
 
-            // =====================================
-            // REKAP JASA
-            // =====================================
+        if (!rekapPart[item.nama_barang]) {
 
-            if (kat === 'Jasa Servis') {
+            rekapPart[item.nama_barang] = {
+                qty: 0,
+                total: 0
+            };
 
-                if (!rekapJasa[item.nama_barang]) {
+        }
 
-                    rekapJasa[item.nama_barang] = {
-                        qty: 0,
-                        total: 0
-                    };
+        rekapPart[item.nama_barang].qty +=
+            parseInt(item.qty || 0);
 
-                }
+        rekapPart[item.nama_barang].total +=
+            parseInt(item.subtotal || 0);
+    }
 
-                rekapJasa[item.nama_barang].qty += parseInt(item.qty || 0);
-
-                rekapJasa[item.nama_barang].total +=
-                    parseInt(item.subtotal || 0);
-
-            }
-
-            // =====================================
-            // REKAP SPAREPART
-            // =====================================
-
-            else {
-
-                if (!rekapPart[item.nama_barang]) {
-
-                    rekapPart[item.nama_barang] = {
-                        qty: 0,
-                        total: 0
-                    };
-
-                }
-
-                rekapPart[item.nama_barang].qty += parseInt(item.qty || 0);
-
-                rekapPart[item.nama_barang].total +=
-                    parseInt(item.subtotal || 0);
-            }
-
-        });
+});
 
     });
 
