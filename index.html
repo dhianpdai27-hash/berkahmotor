@@ -575,13 +575,13 @@ const GAS_URL = "https://script.google.com/macros/s/AKfycby6r_H9GMLq1jBDd_W1PBbJ
         // 1. DISINI TEMPAT MENEMPELKAN LINK WEB APP GOOGLE APPS SCRIPT ANDA
         const WEB_APP_URL = "https://script.google.com/macros/s/AKfycby6r_H9GMLq1jBDd_W1PBbJf0O88kP43V9YbZqPWB6NL722QU7x6WYB6Phv9BUsq97q/exec";
 
-        let dbProducts = [];
-        let dbSales = [];
+        
         let userRole = ''; 
         let salesChartInstance = null;
         let currentCart = [];
         let editModeId = null;
-
+        let isSyncing = false;
+        
         const defaultProducts = [
             {id_produk:"P1", kode_barang:"OLI-01", barcode:"1111", nama_barang:"Oli Shell Helix HX7 10W-40", kategori:"Oli Mesin", harga_beli:75000, harga_jual:95000, stok:15, min_stok:5},
             {id_produk:"P2", kode_barang:"OLI-02", barcode:"2222", nama_barang:"Oli Castrol Magnatec 5W-30", kategori:"Oli Mesin", harga_beli:110000, harga_jual:135000, stok:12, min_stok:4},
@@ -602,17 +602,41 @@ const GAS_URL = "https://script.google.com/macros/s/AKfycby6r_H9GMLq1jBDd_W1PBbJ
     // AUTO REFRESH REALTIME
     // ====================================
 
-    setInterval(() => {
+    setInterval(async () => {
 
-        refreshDatabaseFromSheet();
-
-    }, 15000);
-
-});
-
-        async function loadDatabaseSession() {
     try {
 
+        await refreshDatabaseFromSheet();
+
+    } catch(err) {
+
+        console.error(err);
+
+    }
+
+}, 15000);
+
+});
+window.onerror = function(msg, url, line, col, error) {
+
+    console.error(
+        'GLOBAL ERROR:',
+        msg,
+        'LINE:',
+        line,
+        'COL:',
+        col,
+        error
+    );
+
+    alert(
+        'Terjadi error sistem:\n' +
+        msg +
+        '\nLine: ' + line
+    );
+};
+        async function loadDatabaseSession() {
+    try {
         // ==============================
         // LOAD DATA DARI GOOGLE SHEET
         // ==============================
@@ -627,26 +651,17 @@ const GAS_URL = "https://script.google.com/macros/s/AKfycby6r_H9GMLq1jBDd_W1PBbJ
                 dbProducts = defaultProducts;
             }
 
-           if (result.sales && Array.isArray(result.sales)) {
-    dbSales = result.sales;
-}
-if (result.sales && Array.isArray(result.sales)) {
-    dbSales = result.sales;
-    localStorage.setItem('local_sales', JSON.stringify(dbSales));
-}
-if (result.detail_sales && Array.isArray(result.detail_sales)) {
-    dbDetailSales = result.detail_sales;
-    localStorage.setItem(
-        'local_detail_sales',
-        JSON.stringify(dbDetailSales)
-    );
-}
-
-if (result.dashboard && Array.isArray(result.dashboard)) {
-    dbDashboard = result.dashboard;
-}
+            if (result.sales && Array.isArray(result.sales)) {
+                dbSales = result.sales;
+            }
+            if (result.detail_sales && Array.isArray(result.detail_sales)) {
+                dbDetailSales = result.detail_sales;
+                localStorage.setItem('local_detail_sales', JSON.stringify(dbDetailSales));
+            }
+            if (result.dashboard && Array.isArray(result.dashboard)) {
+                dbDashboard = result.dashboard;
+            }
         }
-
         // ==============================
         // FALLBACK LOCAL STORAGE
         // ==============================
@@ -661,11 +676,11 @@ if (result.dashboard && Array.isArray(result.dashboard)) {
                 dbSales = JSON.parse(localStorage.getItem('local_sales'));
             }
         }
-if(localStorage.getItem('local_detail_sales')) {
-    dbDetailSales = JSON.parse(
-        localStorage.getItem('local_detail_sales')
-    );
-}
+        
+        if(localStorage.getItem('local_detail_sales')) {
+            dbDetailSales = JSON.parse(localStorage.getItem('local_detail_sales'));
+        }
+
         // ==============================
         // SETTINGS NOTA
         // ==============================
@@ -675,10 +690,9 @@ if(localStorage.getItem('local_detail_sales')) {
         }
 
         // ==============================
-        // LOGIN SESSION
+        // LOGIN SESSION CHECK
         // ==============================
         let savedRole = localStorage.getItem('session_role');
-
         if(savedRole) {
             executeLoginSession(savedRole);
         } else {
@@ -686,10 +700,9 @@ if(localStorage.getItem('local_detail_sales')) {
         }
 
     } catch(err) {
-
         console.error('Gagal load database:', err);
 
-        // fallback local
+        // Fallback jika offline / error network
         if(localStorage.getItem('local_prod')) {
             dbProducts = JSON.parse(localStorage.getItem('local_prod'));
         } else {
@@ -699,20 +712,47 @@ if(localStorage.getItem('local_detail_sales')) {
         if(localStorage.getItem('local_sales')) {
             dbSales = JSON.parse(localStorage.getItem('local_sales'));
         }
+        
+        // Tetap arahkan ke login/sesi meskipun offline
+        let savedRole = localStorage.getItem('session_role');
+        if(savedRole) {
+            executeLoginSession(savedRole);
+        } else {
+            document.getElementById('login-screen').style.setProperty('display', 'flex', 'important');
+        }
     }
 }
+
+
+
 async function refreshDatabaseFromSheet() {
 
     try {
 
-        if (WEB_APP_URL === "") return;
+        // ====================================
+        // VALIDASI WEB APP
+        // ====================================
+
+        if (!WEB_APP_URL || WEB_APP_URL === "") {
+            return;
+        }
+
+        // ====================================
+        // FETCH DATA GOOGLE SHEET
+        // ====================================
 
         const response =
             await fetch(
                 WEB_APP_URL + '?action=get_all_data'
             );
 
-        const result = await response.json();
+        const result =
+            await response.json();
+
+        console.log(
+            'SYNC RESULT:',
+            result
+        );
 
         // ====================================
         // PRODUCTS
@@ -728,6 +768,14 @@ async function refreshDatabaseFromSheet() {
             localStorage.setItem(
                 'local_prod',
                 JSON.stringify(dbProducts)
+            );
+
+        } else {
+
+            dbProducts = [];
+
+            localStorage.removeItem(
+                'local_prod'
             );
         }
 
@@ -745,6 +793,14 @@ async function refreshDatabaseFromSheet() {
             localStorage.setItem(
                 'local_sales',
                 JSON.stringify(dbSales)
+            );
+
+        } else {
+
+            dbSales = [];
+
+            localStorage.removeItem(
+                'local_sales'
             );
         }
 
@@ -764,6 +820,31 @@ async function refreshDatabaseFromSheet() {
                 'local_detail_sales',
                 JSON.stringify(dbDetailSales)
             );
+
+        } else {
+
+            dbDetailSales = [];
+
+            localStorage.removeItem(
+                'local_detail_sales'
+            );
+        }
+
+        // ====================================
+        // DASHBOARD
+        // ====================================
+
+        if (
+            result.dashboard &&
+            Array.isArray(result.dashboard)
+        ) {
+
+            dbDashboard =
+                result.dashboard;
+
+        } else {
+
+            dbDashboard = [];
         }
 
         // ====================================
@@ -786,6 +867,8 @@ async function refreshDatabaseFromSheet() {
             renderPOSProducts();
 
             renderServiceHistoryTable();
+
+            renderCart();
         }
 
         if (
@@ -816,42 +899,141 @@ async function refreshDatabaseFromSheet() {
         );
     }
 }
-        function doLogin(role) {
-            let correctPassword = role === 'Owner' ? 'owner123' : 'kasir123';
-            let inputPassword = prompt(`Login Sebagai ${role}\nMasukkan password rahasia:`);
-            
-            if (inputPassword !== null) {
-                if (inputPassword === correctPassword) {
-                    localStorage.setItem('session_role', role);
-                    executeLoginSession(role);
-                    alert(`Selamat datang, login ${role} Berhasil!`);
-                } else {
-                    alert('Gagal Login! Password rahasia yang Anda masukkan salah.');
-                }
-            }
-        }
+       
+                function doLogin(role) {
 
-        function executeLoginSession(role) {
-            userRole = role;
-            document.getElementById('login-screen').style.setProperty('display', 'none', 'important');
-            document.getElementById('current-user').innerText = role === 'Owner' ? 'Owner Bengkel' : 'Kasir Utama';
-            document.getElementById('user-display-role').innerText = role === 'Owner' ? 'Level: Owner' : 'Level: Kasir/Admin';
+    let correctPassword =
+        role === 'Owner'
+            ? 'owner123'
+            : 'kasir123';
 
-            if(role === 'Kasir') {
-                document.getElementById('menu-dashboard').style.display = 'none';
-                document.getElementById('menu-reports').style.display = 'none';
-                navigate('pos');
-            } else {
-                document.getElementById('menu-dashboard').style.display = 'flex';
-                document.getElementById('menu-reports').style.display = 'flex';
-                navigate('dashboard');
-            }
-        }
+    let inputPassword =
+        prompt(
+            `Login Sebagai ${role}\nMasukkan password:`
+        );
 
-        function doLogout() {
-            localStorage.removeItem('session_role');
-            location.reload();
-        }
+    if (inputPassword === null) return;
+
+    if (inputPassword === correctPassword) {
+
+        userRole = role;
+
+        localStorage.setItem(
+            'session_role',
+            role
+        );
+
+        executeLoginSession(role);
+
+        alert(
+            'Login berhasil sebagai ' + role
+        );
+
+    } else {
+
+        alert('Password salah');
+    }
+}
+
+function executeLoginSession(role) {
+
+    userRole = role;
+
+    document.getElementById('login-screen')
+        .style.display = 'none';
+
+    updateSidebarVisibility(role);
+
+    if (role === 'Owner') {
+
+        navigate('dashboard');
+
+    } else {
+
+        navigate('pos');
+    }
+}
+
+function doLogout() {
+
+    localStorage.removeItem(
+        'session_role'
+    );
+
+    userRole = '';
+
+    location.reload();
+}
+
+function updateSidebarVisibility(role) {
+
+    let isOwner =
+        role === 'Owner';
+
+    // DASHBOARD
+    let menuDashboard =
+        document.querySelector(
+            '[onclick="navigate(\'dashboard\')"]'
+        );
+    // REPORT
+    let menuReports =
+        document.querySelector(
+            '[onclick="navigate(\'reports\')"]'
+        );
+
+    // INVENTORY
+    let menuInventory =
+        document.querySelector(
+            '[onclick="navigate(\'inventory\')"]'
+        );
+
+    // SETTINGS
+    let menuSettings =
+        document.querySelector(
+            '[onclick="navigate(\'settings\')"]'
+        );
+
+    // OWNER FULL AKSES
+    if (isOwner) {
+
+        if(menuDashboard)
+            menuDashboard.parentElement.style.display = '';
+
+        if(menuReports)
+            menuReports.parentElement.style.display = '';
+
+        if(menuInventory)
+            menuInventory.parentElement.style.display = '';
+
+        if(menuSettings)
+            menuSettings.parentElement.style.display = '';
+
+    }
+
+    // KASIR TERBATAS
+    else {
+
+        if(menuDashboard)
+            menuDashboard.parentElement.style.display = 'none';
+
+        if(menuReports)
+            menuReports.parentElement.style.display = 'none';
+
+        if(menuInventory)
+            menuInventory.parentElement.style.display = '';
+
+        if(menuSettings)
+            menuSettings.parentElement.style.display = '';
+
+    }
+
+    // LOGOUT TETAP MUNCUL
+    let logoutBtn =
+        document.getElementById('btn-logout');
+
+    if (logoutBtn)
+        logoutBtn.style.display = '';
+}
 
         function setupEvents() {
             document.getElementById('pos-search').addEventListener('input', (e) => {
@@ -863,31 +1045,45 @@ async function refreshDatabaseFromSheet() {
         }
 
         function navigate(viewId) {
-            if((viewId === 'dashboard' || viewId === 'reports') && userRole !== 'Owner') {
-                alert('Akses Ditolak! Menu keuangan bersifat rahasia milik Owner.');
-                return;
-            }
+    // 1. Proteksi Akses (Hanya Owner yang boleh akses Dashboard & Laporan)
+    let roleCheck = (userRole || "").toLowerCase();
+    if ((viewId === 'dashboard' || viewId === 'reports') && roleCheck !== 'owner') {
+        alert('Akses Ditolak! Menu ini hanya untuk Owner.');
+        return;
+    }
 
-            document.querySelectorAll('.view-section').forEach(v => v.classList.add('d-none'));
-            document.getElementById(`view-${viewId}`).classList.remove('d-none');
+    // 2. Sembunyikan semua section, tampilkan yang dipilih
+    document.querySelectorAll('.view-section').forEach(v => v.classList.add('d-none'));
+    let targetView = document.getElementById(`view-${viewId}`);
+    if (targetView) targetView.classList.remove('d-none');
 
-            document.querySelectorAll('.sidebar .nav-link').forEach(l => l.classList.remove('active'));
-            const activeLink = document.querySelector(`.sidebar .nav-link[onclick="navigate('${viewId}')"]`);
-            if(activeLink) activeLink.classList.add('active');
+    // 3. Update Sidebar Active State
+    document.querySelectorAll('.sidebar .nav-link').forEach(l => l.classList.remove('active'));
+    const activeLink = document.querySelector(`.sidebar .nav-link[onclick="navigate('${viewId}')"]`);
+    if (activeLink) activeLink.classList.add('active');
 
-            const titles = {
-                'dashboard': 'Dashboard Ringkasan', 'pos': 'Kasir POS & Medis Unit',
-                'inventory': 'Master Stok Inventori', 'reports': 'Laporan Analisis Untung', 'settings': 'Pengaturan Nota'
-            };
-            document.getElementById('page-title').innerText = titles[viewId] || 'Bengkel System';
+    // 4. Update Judul Halaman
+    const titles = {
+        'dashboard': 'Dashboard Ringkasan', 
+        'pos': 'Kasir POS & Medis Unit',
+        'inventory': 'Master Stok Inventori', 
+        'reports': 'Laporan Analisis Untung', 
+        'settings': 'Pengaturan Nota'
+    };
+    const titleEl = document.getElementById('page-title');
+    if (titleEl) {
+        titleEl.innerText = titles[viewId] || 'Bengkel System';
+    }
 
-            if(viewId === 'dashboard') renderDashboardData();
-            if(viewId === 'pos') { renderPOSProducts(); renderServiceHistoryTable(); }
-            if(viewId === 'inventory') renderInventoryTable();
-            if(viewId === 'reports') renderFinancialReports();
+    // 5. Render Data Sesuai Halaman
+    if(viewId === 'dashboard') renderDashboardData();
+    if(viewId === 'pos') { renderPOSProducts(); renderServiceHistoryTable(); }
+    if(viewId === 'inventory') renderInventoryTable();
+    if(viewId === 'reports') renderFinancialReports();
 
-            toggleSidebarMenu(false);
-        }
+    toggleSidebarMenu(false);
+}
+
 
         function toggleSidebarMenu(force = null) {
             let s = document.getElementById('sidebar');
@@ -906,7 +1102,7 @@ async function refreshDatabaseFromSheet() {
     // =====================================
 
     let omzet = dbSales.reduce(
-        (s, a) => s + (parseInt(a.total) || 0),
+        (s, a) => s + (Number(a.total) || 0),
         0
     );
 
@@ -914,29 +1110,17 @@ async function refreshDatabaseFromSheet() {
 
     return s +
         (
-            parseInt(a.harga_beli || 0)
+            Number(a.harga_beli || 0)
             *
-            parseInt(a.qty || 0)
+            Number(a.qty || 0)
         );
 
 }, 0);
 
-        let modal = 0;
-
-        a.items.forEach(i => {
-            modal += (
-                parseInt(i.harga_beli || 0)
-                *
-                parseInt(i.qty || 0)
-            );
-        });
-
-        return s + modal;
-
-    }, 0);
+        
 
     let lowItems = dbProducts.filter(p =>
-        parseInt(p.stok) <= parseInt(p.min_stok)
+        Number(p.stok) <= Number(p.min_stok)
         &&
         p.kategori !== "Jasa Servis"
     );
@@ -992,11 +1176,22 @@ async function refreshDatabaseFromSheet() {
     // =====================================
 
     let omzetPerHari = {};
+dbSales.forEach(trx => {
 
+    let tgl = trx.tanggal;
+
+    if (!omzetPerHari[tgl]) {
+        omzetPerHari[tgl] = 0;
+    }
+
+    omzetPerHari[tgl] += Number(trx.total || 0);
+
+});
     // =====================================
 // REKAP DARI DETAIL PENJUALAN
 // =====================================
-
+let rekapJasa = {};
+let rekapPart = {};
 dbDetailSales.forEach(item => {
 
     let kat = item.kategori || '';
@@ -1017,10 +1212,10 @@ dbDetailSales.forEach(item => {
         }
 
         rekapJasa[item.nama_barang].qty +=
-            parseInt(item.qty || 0);
+            Number(item.qty || 0);
 
         rekapJasa[item.nama_barang].total +=
-            parseInt(item.subtotal || 0);
+            Number(item.subtotal || 0);
 
     }
 
@@ -1040,10 +1235,10 @@ dbDetailSales.forEach(item => {
         }
 
         rekapPart[item.nama_barang].qty +=
-            parseInt(item.qty || 0);
+            Number(item.qty || 0);
 
         rekapPart[item.nama_barang].total +=
-            parseInt(item.subtotal || 0);
+            Number(item.subtotal || 0);
     }
 
 });
@@ -1144,11 +1339,11 @@ let dataChart = originalLabels.map(tgl => {
             }
             let html = '';
             f.forEach(p => {
-                let isLow = parseInt(p.stok) <= parseInt(p.min_stok) && p.kategori !== "Jasa Servis";
+                let isLow = Number(p.stok) <= Number(p.min_stok) && p.kategori !== "Jasa Servis";
                 html += `
                     <tr class="${isLow ? 'stok-menipis' : ''}">
                         <td><strong>${p.nama_barang}</strong><br><small class="text-muted">${p.kode_barang} (${p.kategori})</small></td>
-                        <td class="text-end text-money">Rp ${parseInt(p.harga_jual || 0).toLocaleString('id-ID')}</td>
+                        <td class="text-end text-money">Rp ${Number(p.harga_jual || 0).toLocaleString('id-ID')}</td>
                         <td class="text-center">${p.kategori === 'Jasa Servis' ? '∞' : p.stok}</td>
                         <td class="text-center"><button class="btn btn-sm btn-danger" onclick="addCart('${p.id_produk}')">+</button></td>
                     </tr>
@@ -1158,19 +1353,83 @@ let dataChart = originalLabels.map(tgl => {
         }
 
         function addCart(id) {
-            let p = dbProducts.find(x =>
-    x.id_produk === id ||
-    x.kode_barang === id
-);
-            if(!p) return;
-            let exist = currentCart.find(c => c.id_produk === id);
-            if(exist) {
-                exist.qty++; exist.subtotal = exist.qty * exist.harga_jual;
-            } else {
-                currentCart.push({ id_produk: p.id_produk, kode_barang: p.kode_barang, nama_barang: p.nama_barang, kategori: p.kategori, harga_beli: parseInt(p.harga_beli), harga_jual: parseInt(p.harga_jual), qty: 1, subtotal: parseInt(p.harga_jual) });
-            }
-            renderCart();
+
+    let p = dbProducts.find(x =>
+        x.id_produk === id ||
+        x.kode_barang === id
+    );
+
+    if (!p) return;
+
+    let exist =
+        currentCart.find(c =>
+            c.id_produk === p.id_produk
+        );
+
+    // ====================================
+    // VALIDASI STOK
+    // ====================================
+
+    if (p.kategori !== 'Jasa Servis') {
+
+        let qtySekarang =
+            exist ? Number(exist.qty) : 0;
+
+        let stokAsli =
+            Number(p.stok || 0);
+
+        if (qtySekarang >= stokAsli) {
+
+            alert('Stok tidak mencukupi');
+
+            return;
         }
+    }
+
+    // ====================================
+    // JIKA SUDAH ADA DI CART
+    // ====================================
+
+    if (exist) {
+
+        exist.qty++;
+
+        exist.subtotal =
+            Number(exist.qty) *
+            Number(exist.harga_jual);
+    }
+
+    // ====================================
+    // JIKA BELUM ADA
+    // ====================================
+
+    else {
+
+        currentCart.push({
+
+            id_produk: p.id_produk,
+
+            kode_barang: p.kode_barang,
+
+            nama_barang: p.nama_barang,
+
+            kategori: p.kategori,
+
+            harga_beli:
+                Number(p.harga_beli || 0),
+
+            harga_jual:
+                Number(p.harga_jual || 0),
+
+            qty: 1,
+
+            subtotal:
+                Number(p.harga_jual || 0)
+        });
+    }
+
+    renderCart();
+}
 
         function renderCart() {
             let html = ''; let sub = 0;
@@ -1205,7 +1464,7 @@ let dataChart = originalLabels.map(tgl => {
 
     let sub = currentCart.reduce((s, a) => s + a.subtotal, 0);
 
-    let disc = parseInt(document.getElementById('pos-discount').value) || 0;
+    let disc = Number(document.getElementById('pos-discount').value) || 0;
 
     let grand = Math.max(0, sub - disc);
 
@@ -1215,7 +1474,7 @@ let dataChart = originalLabels.map(tgl => {
         `Rp ${grand.toLocaleString('id-ID')}`;
 
     let cash =
-        parseInt(document.getElementById('pos-cash-input').value) || 0;
+        Number(document.getElementById('pos-cash-input').value) || 0;
 
     let kembali = 0;
 
@@ -1233,14 +1492,14 @@ let dataChart = originalLabels.map(tgl => {
             if(currentCart.length === 0) return alert('Gagal! Belum pilih oli/sparepart/jasa!');
             
             let grand = window.currentGrandTotal || 0;
-            let cash = parseInt(document.getElementById('pos-cash-input').value) || 0;
+            let cash = Number(document.getElementById('pos-cash-input').value) || 0;
             if(cash < grand) return alert('Gagal! Uang pembayaran kurang.');
 
             let nopol = document.getElementById('srv-nopol').value.toUpperCase() || 'UMUM / TANPA NOPOL';
             let name = document.getElementById('srv-name').value || 'Pelanggan Umum';
             let phone = document.getElementById('srv-phone').value || '-';
             let unit = document.getElementById('srv-unit-type').value || '-';
-            let kmNow = parseInt(document.getElementById('srv-km-now').value) || 0;
+            let kmNow = Number(document.getElementById('srv-km-now').value) || 0;
             let kmNext = kmNow > 0 ? (kmNow + 5000) : 0;
 
             const now = new Date();
@@ -1277,7 +1536,7 @@ let dataTrx = {
     subtotal: currentCart.reduce((s,a)=>s+a.subtotal,0),
 
     diskon:
-        parseInt(
+        Number(
             document.getElementById('pos-discount').value
         ) || 0,
 
@@ -1293,43 +1552,6 @@ let dataTrx = {
 // DETAIL PENJUALAN
 // ======================================
 
-let detailItems = currentCart.map(item => {
-
-    return {
-
-        id_detail:
-            'DTL-' + Date.now() + '-' +
-            Math.floor(Math.random() * 1000),
-
-        id_transaksi:
-            dataTrx.id_transaksi,
-
-        tanggal:
-            dataTrx.tanggal,
-
-        kode_barang:
-            item.kode_barang,
-
-        nama_barang:
-            item.nama_barang,
-
-        kategori:
-            item.kategori,
-
-        harga_beli:
-            parseInt(item.harga_beli || 0),
-
-        harga_jual:
-            parseInt(item.harga_jual || 0),
-
-        qty:
-            parseInt(item.qty || 0),
-
-        subtotal:
-            parseInt(item.subtotal || 0)
-    };
-
-});
 let detailItems = currentCart.map(item => {
 
     return {
@@ -1357,6 +1579,12 @@ let detailItems = currentCart.map(item => {
     };
 
 });
+
+if(!Array.isArray(dbDetailSales)) {
+    dbDetailSales = [];
+}
+
+dbDetailSales.push(...detailItems);
             currentCart.forEach(item => {
                 let target = dbProducts.find(x => x.id_produk === item.id_produk);
                 if(target && target.kategori !== "Jasa Servis") {
@@ -1365,7 +1593,7 @@ let detailItems = currentCart.map(item => {
             });
 
             dbSales.unshift(dataTrx);
-            dbDetailSales.unshift(...detailItems);
+       
             localStorage.setItem('local_sales', JSON.stringify(dbSales));
             localStorage.setItem(
     'local_detail_sales',
@@ -1395,10 +1623,10 @@ let detailItems = currentCart.map(item => {
                     body: JSON.stringify({ action: "sync_master_stok", products: dbProducts })
                 }).catch(err => console.error(err));
             }
-
+dataTrx.items = currentCart;
             printThermalReceipt(dataTrx);
 
-            currentCart = [];
+            currentCart = []
             document.getElementById('srv-nopol').value = '';
             document.getElementById('srv-name').value = '';
             document.getElementById('srv-phone').value = '';
@@ -1435,7 +1663,7 @@ let itemsList = detail.map(i => `
                         <td><strong class="text-danger">${s.nopol}</strong><br>${s.nama_customer} (${s.tipe_mobil})</td>
                         <td>${itemsList}</td>
                         <td class="text-end font-monospace">${s.km_sekarang} KM</td>
-                        <td class="text-end text-warning font-monospace fw-bold">${s.km_next_ganti > 0 ? s.customer.next_km.toLocaleString() + ' KM' : '-'}</td>
+                        <td class="text-end text-warning font-monospace fw-bold">${s.km_next_ganti > 0 ? s.km_next_ganti.toLocaleString() + ' KM' : '-'}</td>
                         <td class="text-end text-money">Rp ${s.total.toLocaleString('id-ID')}</td>
                     </tr>
                 `;
@@ -1549,7 +1777,7 @@ let itemsList = detail.map(i => `
 
         function renderInventoryTable(keyword = '') {
 
-    let data = [...dbProducts];
+   let data = dbProducts;
 
     // ====================================
     // FILTER SEARCH
@@ -1609,7 +1837,7 @@ let itemsList = detail.map(i => `
     data.forEach(p => {
 
         let isLow =
-            parseInt(p.stok) <= parseInt(p.min_stok)
+            Number(p.stok) <= Number(p.min_stok)
             &&
             p.kategori !== "Jasa Servis";
 
@@ -1631,7 +1859,7 @@ let itemsList = detail.map(i => `
                 </td>
 
                 <td class="text-end text-money">
-                    Rp ${parseInt(p.harga_jual || 0)
+                    Rp ${Number(p.harga_jual || 0)
                         .toLocaleString('id-ID')}
                 </td>
 
@@ -1709,16 +1937,16 @@ async function saveProductData(e) {
                     document.getElementById('inv-category').value;
 
                 p.harga_beli =
-                    parseInt(document.getElementById('inv-price-buy').value);
+    Number(document.getElementById('inv-price-buy').value || 0);
 
-                p.harga_jual =
-                    parseInt(document.getElementById('inv-price-sell').value);
+p.harga_jual =
+    Number(document.getElementById('inv-price-sell').value || 0);
 
-                p.stok =
-                    parseInt(document.getElementById('inv-stock').value);
+p.stok =
+    Number(document.getElementById('inv-stock').value || 0);
 
-                p.min_stok =
-                    parseInt(document.getElementById('inv-min-stock').value);
+p.min_stok =
+    Number(document.getElementById('inv-min-stock').value || 0);
             }
 
         }
@@ -1746,16 +1974,16 @@ async function saveProductData(e) {
                     document.getElementById('inv-category').value,
 
                 harga_beli:
-                    parseInt(document.getElementById('inv-price-buy').value),
+    Number(document.getElementById('inv-price-buy').value || 0),
 
-                harga_jual:
-                    parseInt(document.getElementById('inv-price-sell').value),
+harga_jual:
+    Number(document.getElementById('inv-price-sell').value || 0),
 
-                stok:
-                    parseInt(document.getElementById('inv-stock').value),
+stok:
+    Number(document.getElementById('inv-stock').value || 0),
 
-                min_stok:
-                    parseInt(document.getElementById('inv-min-stock').value)
+min_stok:
+    Number(document.getElementById('inv-min-stock').value || 0)
             };
 
             dbProducts.unshift(newP);
@@ -1831,57 +2059,155 @@ async function saveProductData(e) {
 }
 
         function printThermalReceipt(d) {
-            document.getElementById('p-shop-name').innerText = document.getElementById('cfg-shop-name').value;
-            document.getElementById('p-shop-addr').innerText = document.getElementById('cfg-shop-address').value;
-            
-            document.getElementById('print-header-meta').innerHTML = `
 
-    <div class="p-flex">
-        <span>No:</span>
-        <span>${d.id_transaksi}</span>
-    </div>
+    document.getElementById('p-shop-name').innerText =
+        document.getElementById('cfg-shop-name').value;
 
-    <div class="p-flex">
-        <span>Waktu:</span>
-        <span>${d.tanggal} ${d.jam}</span>
-    </div>
+    document.getElementById('p-shop-addr').innerText =
+        document.getElementById('cfg-shop-address').value;
 
-    <div class="p-flex">
-        <span>Mobil:</span>
-        <span>${d.nopol} (${d.tipe_mobil})</span>
-    </div>
+    // =====================================
+    // HEADER NOTA
+    // =====================================
 
-    <div class="p-flex">
-        <span>Cust:</span>
-        <span>${d.nama_customer}</span>
-    </div>
+    document.getElementById('print-header-meta').innerHTML = `
 
-    <div class="p-flex">
-        <span>KM:</span>
-        <span>
-            ${parseInt(d.km_sekarang || 0)
-                .toLocaleString()} KM
-        </span>
-    </div>
-`;
-            let items = '';
-            d.items.forEach(i => {
-                items += `<tr><td colspan="2"><strong>${i.nama_barang}</strong></td></tr><tr><td>${i.qty} x Rp ${i.harga_jual.toLocaleString('id-ID')}</td><td class="p-text-right">Rp ${i.subtotal.toLocaleString('id-ID')}</td></tr>`;
-            });
-            document.getElementById('print-items-body').innerHTML = items;
-            document.getElementById('print-calculation-meta').innerHTML = `
-                <div class="p-flex"><span>Subtotal:</span><span>Rp ${(d.total+d.diskon).toLocaleString('id-ID')}</span></div>
-                <div class="p-flex"><span>Diskon:</span><span>Rp ${d.diskon.toLocaleString('id-ID')}</span></div>
-                <div class="p-flex"><strong>TOTAL AKHIR:</strong><strong>Rp ${d.total.toLocaleString('id-ID')}</strong></div>
-                <div class="p-line"></div>
-                <div class="p-flex"><span>Tunai:</span><span>Rp ${d.dibayar.toLocaleString('id-ID')}</span></div>
-                <div class="p-flex"><span>Kembali:</span><span>Rp ${d.kembalian.toLocaleString('id-ID')}</span></div>
-                ${d.customer.next_km > 0 ? `<div class="p-text-center" style="margin-top:5px;"><small>⚠️ Kembali ganti oli di: ${d.customer.next_km.toLocaleString()} KM</small></div>` : ''}
-            `;
-            window.print();
-        }
+        <div class="p-flex">
+            <span>No:</span>
+            <span>${d.id_transaksi}</span>
+        </div>
+
+        <div class="p-flex">
+            <span>Waktu:</span>
+            <span>${d.tanggal} ${d.jam}</span>
+        </div>
+
+        <div class="p-flex">
+            <span>Mobil:</span>
+            <span>${d.nopol} (${d.tipe_mobil})</span>
+        </div>
+
+        <div class="p-flex">
+            <span>Cust:</span>
+            <span>${d.nama_customer}</span>
+        </div>
+
+        <div class="p-flex">
+            <span>KM:</span>
+            <span>
+                ${parseInt(d.km_sekarang || 0).toLocaleString()} KM
+            </span>
+        </div>
+    `;
+
+    // =====================================
+    // ITEM BELANJA
+    // =====================================
+
+    let items = '';
+
+    d.items.forEach(i => {
+
+        items += `
+            <tr>
+                <td colspan="2">
+                    <strong>${i.nama_barang}</strong>
+                </td>
+            </tr>
+
+            <tr>
+                <td>
+                    ${i.qty} x Rp ${parseInt(i.harga_jual || 0)
+                        .toLocaleString('id-ID')}
+                </td>
+
+                <td class="p-text-right">
+                    Rp ${parseInt(i.subtotal || 0)
+                        .toLocaleString('id-ID')}
+                </td>
+            </tr>
+        `;
+    });
+
+    document.getElementById('print-items-body').innerHTML = items;
+
+    // =====================================
+    // TOTAL PEMBAYARAN
+    // =====================================
+
+    document.getElementById('print-calculation-meta').innerHTML = `
+
+        <div class="p-flex">
+            <span>Subtotal:</span>
+            <span>
+                Rp ${(d.total + d.diskon)
+                    .toLocaleString('id-ID')}
+            </span>
+        </div>
+
+        <div class="p-flex">
+            <span>Diskon:</span>
+            <span>
+                Rp ${parseInt(d.diskon || 0)
+                    .toLocaleString('id-ID')}
+            </span>
+        </div>
+
+        <div class="p-flex">
+            <strong>TOTAL AKHIR:</strong>
+            <strong>
+                Rp ${parseInt(d.total || 0)
+                    .toLocaleString('id-ID')}
+            </strong>
+        </div>
+
+        <div class="p-line"></div>
+
+        <div class="p-flex">
+            <span>Tunai:</span>
+            <span>
+                Rp ${parseInt(d.dibayar || 0)
+                    .toLocaleString('id-ID')}
+            </span>
+        </div>
+
+        <div class="p-flex">
+            <span>Kembali:</span>
+            <span>
+                Rp ${parseInt(d.kembalian || 0)
+                    .toLocaleString('id-ID')}
+            </span>
+        </div>
+
+        ${d.km_next_ganti > 0 ? `
+
+        <div class="p-text-center" style="margin-top:5px;">
+
+            <small>
+                ⚠️ Kembali ganti oli di:
+                ${parseInt(d.km_next_ganti)
+                    .toLocaleString()} KM
+            </small>
+
+        </div>
+
+        ` : ''}
+
+    `;
+
+    // =====================================
+    // PRINT
+    // =====================================
+
+    window.print();
+}
 
         function renderFinancialReports() {
+
+    let rekapJasa = {};
+    let rekapPart = {};
+
+    // lanjut kode lama...
 
     // =====================================
     // HITUNG OMZET DAN HPP
@@ -1893,23 +2219,13 @@ async function saveProductData(e) {
 
     return s +
         (
-            parseInt(item.harga_beli || 0)
-            *
-            parseInt(item.qty || 0)
+            Number(item.harga_beli || 0)
+*
+Number(item.qty || 0)
         );
 
 }, 0);
-        let modal = 0;
-
-        trx.items.forEach(item => {
-
-            modal += (parseInt(item.harga_beli || 0) * parseInt(item.qty || 0));
-
-        });
-
-        return s + modal;
-
-    }, 0);
+        
 
     // =====================================
     // TAMPILKAN SUMMARY
@@ -1983,7 +2299,6 @@ dbDetailSales.forEach(item => {
 
 });
 
-    });
 
     // =====================================
     // RENDER TABLE JASA
@@ -2059,6 +2374,23 @@ dbDetailSales.forEach(item => {
                 else rows[i].style.setProperty('display', 'none', 'important');
             }
         }
+       // Fungsi ini dijalankan saat halaman pertama kali dibuka
+window.addEventListener('load', function() {
+    let savedRole = localStorage.getItem('session_role');
+    let loginScreen = document.getElementById('login-screen');
+
+    if (savedRole) {
+        // Jika ada data login di localStorage, baru boleh masuk otomatis
+        userRole = savedRole;
+        updateSidebarVisibility(userRole);
+        loginScreen.style.display = 'none'; // Sembunyikan login
+        navigate(userRole === 'owner' ? 'dashboard' : 'pos');
+    } else {
+        // Jika TIDAK ADA data login, pastikan layar login TETAP MUNCUL
+        loginScreen.style.display = 'flex'; // Tampilkan layar login
+    }
+});
+ 
     </script>
 </body>
 </html>
